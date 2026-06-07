@@ -1,15 +1,15 @@
-# Contribution [#]: [Issue Title]
+# Contribution 1: Refactor VulkanExportJsonConsumerBase to Use Names of Json Fields Directly
 
-**Contribution Number:** [1 / 2 / 3]  
-**Student:** [Your Name]  
-**Issue:** [GitHub issue link]  
-**Status:** [Phase I / Phase II / Phase III / Phase IV] [In Progress / Complete]
+**Contribution Number:** 1  
+**Student:** Kossi Sessou  
+**Issue:** https://github.com/LunarG/gfxreconstruct/issues/1364  
+**Status:** Phase I - Complete
 
 ---
 
 ## Why I Chose This Issue
 
-[1-2 paragraphs explaining why this issue interests you, how it matches your skills/learning goals, what you hope to learn]
+This issue aligns with my focus on low-level systems and infrastructure resilience. Working on GFXReconstruct provides direct experience with deterministic state tracking and system-level API interception. I will learn how diagnostic utilities maintain runtime consistency and interface with automated validation pipelines, directly supporting my goals in backend optimization and infrastructure automation.
 
 ---
 
@@ -17,19 +17,21 @@
 
 ### Problem Description
 
-[In your own words, what's broken or missing?]
+The codebase contains thin wrapper functions in VulkanExportJsonConsumerBase, like NameFunction(), that do nothing except return a constant (e.g. format::kNameFunction). These wrappers exist as a leftover from an earlier design discussion about supporting multiple JSON schemas, which never materialized. There's no bug and no missing feature — the code works correctly, it's just carrying unnecessary indirection that adds noise without any benefit.
 
 ### Expected Behavior
 
-[What should happen?]
+Callers reference JSON field name constants like format::kNameFunction directly, with no intermediary layer.
 
 ### Current Behavior
 
-[What actually happens?]
+Callers go through wrapper methods like NameFunction() which simply return the constant — one extra, purposeless hop.
 
 ### Affected Components
 
-[Which parts of the codebase are involved?]
+- VulkanExportJsonConsumerBase in the JSON export layer (primary)
+- Any files that call the wrapper methods (the call sites to be updated)
+- format::kName* constants (referenced but unchanged)
 
 ---
 
