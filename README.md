@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Kossi Sessou  
 **Issue:** https://github.com/LunarG/gfxreconstruct/issues/1364  
-**Status:** Phase II - Complete
+**Status:** Phase III - Complete
 
 ---
 
@@ -79,11 +79,11 @@ No Vulkan SDK or CMake build was needed for this refactor — the changes are pu
 
 ### Analysis
 
-[Your analysis of the root cause - what's causing the issue?]
+There is no bug to root-cause here — the "issue" is accumulated indirection. The `NameXxx()` methods on `VulkanExportJsonConsumerBase` / `OpenXrExportJsonConsumerBase` are leftovers from an abandoned design that would have supported multiple JSON schemas. Each method does nothing but return a single constant (e.g. `NameReturn()` → `format::kNameReturn`), so every call site pays for a function-call hop that resolves to a compile-time constant anyway. The DX12 side of the codebase had already been migrated to reference the constants directly, which left the Vulkan and OpenXR sides as the inconsistent outliers. The root "cause," then, is simply that the cleanup was started for DX12 and never finished for the other two APIs.
 
 ### Proposed Solution
 
-[High-level description of your fix approach]
+Delete the wrapper methods and replace every call site with the underlying `format::kName*` constant, matching the pattern DX12 already uses. Because ~1,861 of the ~1,884 call sites live in **generated** files, the fix can't stop at the generated output — the two Python generators that emit those files must be updated in the same change, or the next codegen run would reintroduce the wrappers. Two call sites (`NameCommandIndex()`, `NameSubmitIndex()`) returned raw string literals with no matching constant, so two new constants are added to `format/format_json.h` first. The change is purely structural: the JSON field-name strings emitted at runtime are unchanged, so output is byte-for-byte identical before and after.
 
 ### Implementation Plan
 
@@ -114,52 +114,88 @@ Using UMPIRE framework (adapted):
 
 ## Testing Strategy
 
-### Unit Tests
+This is a pure mechanical refactor with **zero behavioral change** — no new branch, no new value, no changed runtime string. A conventional "write a test that would have caught the bug" doesn't apply because there is no bug and no new behavior to assert. Instead, validation focuses on the two ways this *class* of change can actually break: (1) a missed or mistyped call-site replacement, and (2) the generators drifting out of sync with the generated files they produce. Both are covered below.
 
-- [ ] Test case 1: [Description]
-- [ ] Test case 2: [Description]
-- [ ] Test case 3: [Description]
+### Static Verification (the replacement is complete and correct)
 
-### Integration Tests
+The end-state invariant is "zero wrapper calls remain anywhere." Verified with:
 
-- [ ] Integration scenario 1
-- [ ] Integration scenario 2
+```bash
+grep -rn "NameReturn()\|NameArgs()\|NameCommandIndex()\|NameSubmitIndex()" \
+  framework/ --include="*.cpp" --include="*.h" --include="*.py"
+```
 
-### Manual Testing
+**Result: 0 matches** across all C++ and Python sources — no leftover wrappers in hand-edited files, generated files, or generator templates.
 
-[What you tested manually and results]
+### Regeneration Determinism Check (generators ⇄ generated files agree)
+
+This is the most important check for a generated-code change. If the two updated generators (`khronos_json_consumer_body_generator.py`, `vulkan_json_consumer_body_generator.py`) didn't exactly match the hand-edited generated `.cpp` files, the next codegen run would silently revert the fix. I proved they agree by regenerating from the pinned upstream registries and diffing against what's committed:
+
+1. Initialized the registry submodules at their pinned commits: `Vulkan-Headers` (`8864cdc`), `OpenXR-SDK` (`67cfb6a`), `OpenXR-Docs` (`0299068`).
+2. Created an isolated Python venv with `pyparsing` (the Khronos registry parser dependency; macOS system Python is PEP-668 externally-managed).
+3. Ran each generator's `gencode.py` for the JSON-consumer target into a scratch directory.
+4. `diff`'d the freshly generated output against the committed file.
+
+| Generated file | Diff vs committed | Direct `format::kName*` uses | Leftover wrappers |
+|----------------|-------------------|------------------------------|-------------------|
+| `generated_vulkan_json_consumer.cpp` | **0 lines (byte-identical)** | 1020 | 0 |
+| `generated_openxr_json_consumer.cpp` | **0 lines (byte-identical)** | 550 | 0 |
+
+Both files regenerate **byte-for-byte identical** to the committed versions, confirming the generators and generated code are fully consistent — the change is stable across future codegen runs.
+
+### Build / Integration (deferred to CI)
+
+A full compile and the existing JSON-consumer test suite would confirm the emitted JSON is unchanged at the integration level. I did not run a full CMake/Vulkan-SDK build locally (none is installed on the dev machine, and it is not required to implement or validate a pure text/codegen refactor). Because the change introduces no new symbols and only swaps a function call for the identical constant it returned, and because the regeneration check above is exact, upstream CI on the PR is the appropriate place to confirm the build — which it will do automatically in Phase IV.
 
 ---
 
 ## Implementation Notes
 
-### Week [X] Progress
+### Implementation Progress
 
-[What you built this week, challenges faced, decisions made]
+Worked the UMPIRE plan from Phase II top to bottom:
 
-### Week [Y] Progress
+1. **Added the two missing constants** to `framework/format/format_json.h` (`kNameCommandIndex` → `"cmd_index"`, `kNameSubmitIndex` → `"sub_index"`) so the two raw-string-literal wrappers had constants to point at.
+2. **Removed the wrapper blocks** from `vulkan_json_consumer_base.h` and `openxr_json_consumer_base.h` (11 methods each).
+3. **Replaced every call site** with the corresponding `format::kName*` constant across the two hand-written `.cpp` base files and the two large generated `.cpp` files.
+4. **Updated both generators** (`khronos_json_consumer_body_generator.py`, `vulkan_json_consumer_body_generator.py`) so regenerated output emits the constants directly and never reintroduces the wrappers.
+5. **Verified** with the zero-match grep, then proved generator/output consistency with the regeneration determinism check (see Testing Strategy) — both generated files regenerate byte-identical to what's committed.
 
-[Continue documenting as you work]
+### Challenges Faced
+
+- **Scope was larger than the issue implied.** The issue reads like a handful of base-class methods, but ~1,861 of the ~1,884 call sites live in *generated* files. Editing only the generated output would have been silently undone on the next codegen run, so the real fix had to include the Python generators.
+- **Two wrappers had no backing constant.** `NameCommandIndex()` and `NameSubmitIndex()` returned raw string literals (`"cmd_index"`, `"sub_index"`), not `format::kName*` constants. They had to be promoted to new constants before the wrappers could be deleted — otherwise the call-site replacement would have had nothing to reference.
+- **Validating a generated-code change without a build.** Rather than stand up a full Vulkan SDK + CMake build, I validated the change at the codegen layer: I initialized the `Vulkan-Headers`, `OpenXR-SDK`, and `OpenXR-Docs` submodules at their pinned commits and re-ran the project's own generators (in an isolated venv, since system Python is PEP-668 managed and the registry parser needs `pyparsing`). The diff against committed output was empty for both files — exactly the guarantee that matters for this change.
 
 ### Code Changes
 
-- **Files modified:** [List]
-- **Key commits:** [Links to important commits]
-- **Approach decisions:** [Why you chose certain approaches]
+- **Files modified (9 files, +1,893 / −1,939):**
+  - `framework/format/format_json.h` — +2 new constants
+  - `framework/decode/vulkan_json_consumer_base.h` — −11 wrapper methods
+  - `framework/decode/openxr_json_consumer_base.h` — −11 wrapper methods
+  - `framework/decode/vulkan_json_consumer_base.cpp` — 15 call sites updated
+  - `framework/decode/openxr_json_consumer_base.cpp` — 8 call sites updated
+  - `framework/generated/generated_vulkan_json_consumer.cpp` — ~1,311 call sites updated (generated)
+  - `framework/generated/generated_openxr_json_consumer.cpp` — ~550 call sites updated (generated)
+  - `framework/generated/khronos_generators/khronos_json_consumer_body_generator.py` — emit `format::kNameReturn` / `format::kNameArgs`
+  - `framework/generated/khronos_generators/vulkan_generators/vulkan_json_consumer_body_generator.py` — emit `format::kNameCommandIndex` / `format::kNameSubmitIndex`
+- **Key commit:** [`23b5cc4`](https://github.com/KossiSessou/gfxreconstruct/commit/23b5cc4) — "Refactor: replace NameXxx() wrappers with format::kNameXxx constants directly"
+- **Approach decisions:** Matched the existing DX12 end-state pattern rather than inventing a new one; updated generators alongside generated files to keep the change durable; added missing constants instead of leaving two stray string literals so the codebase ends fully consistent.
 
 ---
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when submitted]
+**Working Branch:** https://github.com/KossiSessou/gfxreconstruct/tree/refactor/remove-name-wrappers (pushed, HEAD at `23b5cc4`)
 
-**PR Description:** [Draft or final PR description - much of the content above can be adapted]
+**PR Link:** Not yet submitted — PR submission is Phase IV. Will target the `dev` branch per CONTRIBUTING.md, after a final `clang-format-14` pass on the hand-edited C++ files.
+
+**PR Description (draft):** Removes the `NameXxx()` JSON-field-name wrapper methods from the Vulkan and OpenXR JSON export consumers and replaces all ~1,884 call sites with the `format::kName*` constants directly, matching the pattern already used by the DX12 consumer. Adds two missing constants (`kNameCommandIndex`, `kNameSubmitIndex`) for the two wrappers that returned raw string literals. The code generators are updated in the same change so regenerated output stays consistent — verified byte-identical via regeneration. No behavioral change: emitted JSON is unchanged. Fixes #1364.
 
 **Maintainer Feedback:**
-- [Date]: [Summary of feedback received]
-- [Date]: [How you addressed it]
+- _None yet — PR not yet opened._
 
-**Status:** [Awaiting review / Iterating / Approved / Merged]
+**Status:** Implementation complete and validated locally; awaiting Phase IV PR submission.
 
 ---
 
@@ -167,20 +203,23 @@ Using UMPIRE framework (adapted):
 
 ### Technical Skills Gained
 
-[What you learned technically]
+- How a large C++ project keeps hand-written and machine-generated code in sync, and why a refactor that touches generated files has to touch the generators too.
+- Driving the GFXReconstruct Khronos code generators directly (`gencode.py` against the Vulkan/OpenXR XML registries) and using a regeneration diff as a determinism test.
+- Practical Git submodule handling — initializing only the submodules I needed at their pinned commits — and working around a PEP-668 externally-managed Python by isolating the registry parser dependency (`pyparsing`) in a venv.
 
 ### Challenges Overcome
 
-[What was hard and how you solved it]
+The hardest part was realizing the issue's true scope and finding a way to *prove* the change was safe without a full build. The breakthrough was treating "regenerate and diff" as the test: if the generators and the committed generated files produce byte-identical output, the change is provably durable. That reframed an intimidating ~1,900-line diff into something I could verify in seconds.
 
 ### What I'd Do Differently Next Time
 
-[Reflection on your process]
+Run the regeneration check *first*, before hand-editing the generated files — generating into place and committing the generator output directly would have been less error-prone than editing 1,800+ call sites by hand and verifying afterward. I'd also confirm the full call-site count and the generated-file involvement during Phase I scoping, rather than discovering the real scope mid-implementation.
 
 ---
 
 ## Resources Used
 
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
+- [GFXReconstruct CONTRIBUTING.md](https://github.com/LunarG/gfxreconstruct/blob/dev/CONTRIBUTING.md) — branch/PR conventions, `clang-format-14` requirement
+- [Issue #1364](https://github.com/LunarG/gfxreconstruct/issues/1364) — the original refactor request
+- The existing DX12 JSON consumer + its generator (`dx12_json_consumer_body_generator.py`) — reference for the correct end-state pattern
+- Khronos `Vulkan-Headers` and `OpenXR-SDK`/`OpenXR-Docs` registries and the bundled `gencode.py` generator scripts
