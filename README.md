@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Kossi Sessou  
 **Issue:** https://github.com/LunarG/gfxreconstruct/issues/1364  
-**Status:** Phase III - Complete
+**Status:** Phase IV - Complete (PR submitted, awaiting review)
 
 ---
 
@@ -70,7 +70,7 @@ No Vulkan SDK or CMake build was needed for this refactor — the changes are pu
 ### Reproduction Evidence
 
 - **Branch Link:** https://github.com/KossiSessou/gfxreconstruct/tree/refactor/remove-name-wrappers
-- **Commit implementing the fix:** https://github.com/KossiSessou/gfxreconstruct/commit/23b5cc4
+- **Commit implementing the fix:** https://github.com/KossiSessou/gfxreconstruct/commit/2a7a98a4 (originally `23b5cc4`; rebased onto latest upstream `dev` and `clang-format`-amended in Phase IV)
 - **My findings:** The scope was larger than the issue description implied. The generated `.cpp` files have over 1,800 call sites combined, and two Python generator scripts also emit wrapper calls — so the generators needed to be updated alongside the generated files, otherwise the fix would be reverted on the next codegen run.
 
 ---
@@ -179,23 +179,28 @@ Worked the UMPIRE plan from Phase II top to bottom:
   - `framework/generated/generated_openxr_json_consumer.cpp` — ~550 call sites updated (generated)
   - `framework/generated/khronos_generators/khronos_json_consumer_body_generator.py` — emit `format::kNameReturn` / `format::kNameArgs`
   - `framework/generated/khronos_generators/vulkan_generators/vulkan_json_consumer_body_generator.py` — emit `format::kNameCommandIndex` / `format::kNameSubmitIndex`
-- **Key commit:** [`23b5cc4`](https://github.com/KossiSessou/gfxreconstruct/commit/23b5cc4) — "Refactor: replace NameXxx() wrappers with format::kNameXxx constants directly"
+- **Key commit:** [`2a7a98a4`](https://github.com/KossiSessou/gfxreconstruct/commit/2a7a98a4) — "Refactor: replace NameXxx() wrappers with format::kNameXxx constants directly" (rebased/`clang-format`-amended from the original `23b5cc4` in Phase IV)
 - **Approach decisions:** Matched the existing DX12 end-state pattern rather than inventing a new one; updated generators alongside generated files to keep the change durable; added missing constants instead of leaving two stray string literals so the codebase ends fully consistent.
 
 ---
 
 ## Pull Request
 
-**Working Branch:** https://github.com/KossiSessou/gfxreconstruct/tree/refactor/remove-name-wrappers (pushed, HEAD at `23b5cc4`)
+**Working Branch:** https://github.com/KossiSessou/gfxreconstruct/tree/refactor/remove-name-wrappers (pushed, HEAD at `2a7a98a4`)
 
-**PR Link:** Not yet submitted — PR submission is Phase IV. Will target the `dev` branch per CONTRIBUTING.md, after a final `clang-format-14` pass on the hand-edited C++ files.
+**PR Link:** https://github.com/LunarG/gfxreconstruct/pull/3063 — targets the upstream `dev` branch per CONTRIBUTING.md.
 
-**PR Description (draft):** Removes the `NameXxx()` JSON-field-name wrapper methods from the Vulkan and OpenXR JSON export consumers and replaces all ~1,884 call sites with the `format::kName*` constants directly, matching the pattern already used by the DX12 consumer. Adds two missing constants (`kNameCommandIndex`, `kNameSubmitIndex`) for the two wrappers that returned raw string literals. The code generators are updated in the same change so regenerated output stays consistent — verified byte-identical via regeneration. No behavioral change: emitted JSON is unchanged. Fixes #1364.
+**PR Description:** Removes the `NameXxx()` JSON-field-name wrapper methods from the Vulkan and OpenXR JSON export consumers and replaces all ~1,884 call sites with the `format::kName*` constants directly, matching the pattern already used by the DX12 consumer. Adds two missing constants (`kNameCommandIndex`, `kNameSubmitIndex`) for the two wrappers that returned raw string literals, and updates the two code generators so regenerated output stays consistent — verified byte-identical via regeneration. No behavioral change: emitted JSON is unchanged. Closes #1364.
+
+**Pre-submission steps completed:**
+- Rebased the branch onto the latest upstream `dev` (was 54 commits behind; no file overlap, so the rebase was conflict-free) and force-pushed with `--force-with-lease`.
+- Ran `clang-format` over the two hand-edited C++ base files per CONTRIBUTING.md — this re-aligned 10 assignment lines whose alignment had gone stale after the mechanical token replacement. The generated files were already format-clean. Amended into the single commit (`2a7a98a4`).
+- Confirmed the diff is exactly the 9 documented files with no unrelated changes, and that the PR shows as `MERGEABLE` against `dev`.
 
 **Maintainer Feedback:**
-- _None yet — PR not yet opened._
+- _None yet — PR opened 2026-06-30 and a review was requested from `@andrew-lunarg` (the issue author). Awaiting first review; will summarize feedback and how it was addressed here as it arrives._
 
-**Status:** Implementation complete and validated locally; awaiting Phase IV PR submission.
+**Status:** Awaiting review.
 
 ---
 
