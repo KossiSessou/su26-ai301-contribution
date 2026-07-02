@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Kossi Sessou  
 **Issue:** https://github.com/LunarG/gfxreconstruct/issues/1364  
-**Status:** Phase IV - Complete (PR submitted, awaiting review)
+**Status:** Phase IV - Complete (PR #3063 MERGED)
 
 ---
 
@@ -198,9 +198,9 @@ Worked the UMPIRE plan from Phase II top to bottom:
 - Confirmed the diff is exactly the 9 documented files with no unrelated changes, and that the PR shows as `MERGEABLE` against `dev`.
 
 **Maintainer Feedback:**
-- _None yet — PR opened 2026-06-30 and a review was requested from `@andrew-lunarg` (the issue author). Awaiting first review; will summarize feedback and how it was addressed here as it arrives._
+- Reviewed and **approved by `@mikes-lunarg`** with no requested changes. Merged into upstream `dev` on 2026-07-01 (merge commit `bb99159d`). Issue #1364 auto-closed on merge.
 
-**Status:** Awaiting review.
+**Status:** **Merged.** ✅
 
 ---
 
